@@ -91,10 +91,10 @@ class MealViewModel: ObservableObject {
             "notes": meal.notes
         ])
 
-        await MainActor.run {
-            meals.append(meal)
-            meals.sort { $0.date > $1.date }
-        }
+      // await MainActor.run {
+        //    meals.append(meal)
+          //  meals.sort { $0.date > $1.date }
+        //}
     }
 
     private func estimateCalories(from image: UIImage) -> Int {

@@ -17,6 +17,9 @@ struct AddMealView: View {
     @State private var isNotesValid = true
     @State private var isImageValid = true
 
+    // Prevent duplicate save taps / re-entrancy
+    @State private var hasSavedOnce = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -94,7 +97,9 @@ struct AddMealView: View {
                             Spacer()
                         }
                     }
-                    .disabled(!isFormValid || isUploading)
+                    // Disable during upload OR after a successful save
+                    .disabled(!isFormValid || isUploading || hasSavedOnce)
+                    .allowsHitTesting(!(isUploading || hasSavedOnce))
                     .listRowBackground(isFormValid ? Color.blue : Color.gray.opacity(0.5))
                     .foregroundColor(.white)
                 }
@@ -123,6 +128,9 @@ struct AddMealView: View {
 
     // MARK: - Save Meal Action
     private func saveMeal() {
+        // One-shot guard to prevent duplicate document creation
+        guard !isUploading && !hasSavedOnce else { return }
+
         guard let data = imageData, let image = UIImage(data: data) else {
             errorMessage = "Please select a valid photo."
             isImageValid = false
@@ -138,13 +146,14 @@ struct AddMealView: View {
             do {
                 try await mealViewModel.addMeal(image: image, notes: trimmedNotes)
                 await MainActor.run {
+                    hasSavedOnce = true   // ensure we never re-run
                     dismiss()
                 }
             } catch {
                 await MainActor.run {
                     errorMessage = parseErrorMessage(error)
                     showErrorAlert = true
-                    isUploading = false
+                    isUploading = false   // allow retry if it failed
                 }
             }
         }
@@ -185,6 +194,4 @@ struct AddMealView: View {
         }
     }
 }
-
-
 
