@@ -73,8 +73,14 @@ struct MealRowView: View {
 }
 
 struct MealDetailView: View {
+    @EnvironmentObject private var mealViewModel: MealViewModel
+    @Environment(\.dismiss) private var dismiss
+
     let meal: Meal
-    
+    @State private var showingDeleteConfirm = false
+    @State private var isDeleting = false
+    @State private var deleteError: String?
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -88,26 +94,79 @@ struct MealDetailView: View {
                     .frame(maxHeight: 300)
                     .cornerRadius(12)
                 }
-                
+
                 Text("\(meal.calories) calories")
                     .font(.title)
-                
+
                 Text(meal.date.formatted(date: .complete, time: .complete))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                
+
                 if !meal.notes.isEmpty {
                     Text(meal.notes)
                         .padding()
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
                 }
+
+                // Visible Delete button (also in toolbar below)
+                Button(role: .destructive) {
+                    showingDeleteConfirm = true
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isDeleting {
+                            ProgressView()
+                        } else {
+                            Label("Delete Meal", systemImage: "trash")
+                        }
+                        Spacer()
+                    }
+                }
+                .padding(.top, 16)
             }
             .padding()
         }
         .navigationTitle("Meal Details")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(role: .destructive) {
+                    showingDeleteConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(isDeleting)
+            }
+        }
+        .alert("Delete this meal?", isPresented: $showingDeleteConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    await deleteMeal()
+                }
+            }
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .alert("Couldn’t delete", isPresented: .constant(deleteError != nil)) {
+            Button("OK") { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
+        }
+    }
+
+    private func deleteMeal() async {
+        isDeleting = true
+        do {
+            try await mealViewModel.deleteMeal(meal)
+            await MainActor.run { dismiss() }
+        } catch {
+            await MainActor.run { deleteError = error.localizedDescription }
+        }
+        isDeleting = false
     }
 }
+
 
 #Preview {
     ContentView()
