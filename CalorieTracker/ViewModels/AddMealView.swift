@@ -1,197 +1,191 @@
 import SwiftUI
 import PhotosUI
-import FirebaseStorage
 
 struct AddMealView: View {
     @EnvironmentObject var mealViewModel: MealViewModel
-    @Environment(\.dismiss) var dismiss
+    @Environment(\.dismiss) private var dismiss
+    var onSaved: (() -> Void)? = nil
 
     @State private var selectedImage: PhotosPickerItem?
-    @State private var imageData: Data?
+    @State private var uiImage: UIImage?
     @State private var notes = ""
     @State private var isUploading = false
     @State private var errorMessage: String?
     @State private var showErrorAlert = false
+    @FocusState private var notesFocused: Bool
 
-    // Input validation states
-    @State private var isNotesValid = true
-    @State private var isImageValid = true
-
-    // Prevent duplicate save taps / re-entrancy
-    @State private var hasSavedOnce = false
+    // Estimation + confirmation
+    @State private var estimatedCalories: Int?
+    @State private var caloriesToSave: Int = 0
+    @State private var showConfirmSheet = false
+    @State private var isEstimating = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                // MARK: - Photo Section
-                Section(header: Text("Meal Photo").font(.subheadline)) {
-                    PhotosPicker(
-                        selection: $selectedImage,
-                        matching: .images,
-                        photoLibrary: .shared()
-                    ) {
-                        Label(
-                            title: { Text("Choose Photo") },
-                            icon: { Image(systemName: "photo") }
-                        )
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 16) {
+                    PhotosPicker(selection: $selectedImage, matching: .images, photoLibrary: .shared()) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12).strokeBorder(.secondary.opacity(0.2), lineWidth: 1)
+                                .frame(height: 220)
+                                .overlay(
+                                    Group {
+                                        if let uiImage {
+                                            Image(uiImage: uiImage)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(height: 220)
+                                                .clipped()
+                                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        } else {
+                                            VStack(spacing: 8) {
+                                                Image(systemName: "photo.on.rectangle").font(.title2)
+                                                Text("Tap to choose a photo")
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                )
+                        }
                     }
-                    .onChange(of: selectedImage) { newItem in
+                    .onChange(of: selectedImage) { newValue in
                         Task {
-                            if let data = try? await newItem?.loadTransferable(type: Data.self) {
-                                imageData = data
-                                isImageValid = true
-                            } else {
-                                imageData = nil
-                                isImageValid = false
+                            if let data = try? await newValue?.loadTransferable(type: Data.self),
+                               let img = UIImage(data: data) {
+                                uiImage = img
                             }
                         }
                     }
 
-                    if let data = imageData, let uiImage = UIImage(data: data) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 200)
-                            .cornerRadius(8)
-                            .padding(.vertical, 4)
-                    } else if !isImageValid {
-                        Text("Invalid image. Please select another.")
-                            .foregroundColor(.red)
-                            .font(.caption)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Notes").font(.subheadline).foregroundStyle(.secondary)
+                        TextField("Optional", text: $notes, axis: .vertical)
+                            .lineLimit(1...5)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($notesFocused)
                     }
-                }
+                    .padding(.horizontal)
 
-                // MARK: - Notes Section
-                Section(header: Text("Notes").font(.subheadline)) {
-                    TextField("Describe your meal (optional)", text: $notes)
-                        .onChange(of: notes) { _ in
-                            isNotesValid = true
-                        }
-                }
-
-                // MARK: - Error Section
-                if let errorMessage = errorMessage {
-                    Section {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                            Text(errorMessage)
-                                .foregroundColor(.primary)
-                        }
-                        .listRowBackground(Color.orange.opacity(0.1))
-                    }
-                }
-
-                // MARK: - Save Button
-                Section {
-                    Button(action: saveMeal) {
-                        HStack {
-                            Spacer()
-                            if isUploading {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("Save Meal")
-                                    .fontWeight(.semibold)
-                            }
-                            Spacer()
-                        }
-                    }
-                    // Disable during upload OR after a successful save
-                    .disabled(!isFormValid || isUploading || hasSavedOnce)
-                    .allowsHitTesting(!(isUploading || hasSavedOnce))
-                    .listRowBackground(isFormValid ? Color.blue : Color.gray.opacity(0.5))
-                    .foregroundColor(.white)
+                    Spacer(minLength: 24)
                 }
             }
-            .navigationTitle("Add Meal")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+            .scrollDismissesKeyboard(.interactively)
+            
+        }
+        .navigationTitle("Add Meal")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarBackground(Color(.systemBackground), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await saveTapped() }
+                } label: {
+                    if isUploading || isEstimating { ProgressView() } else { Text("Save").bold() }
                 }
+                .disabled(isUploading || isEstimating || uiImage == nil)
             }
-            .alert("Upload Failed", isPresented: $showErrorAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage ?? "Unknown error occurred")
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { notesFocused = false }
             }
+        }
+        .alert("Couldn't save meal", isPresented: $showErrorAlert, actions: {
+            Button("OK", role: .cancel) { }
+        }, message: {
+            Text(errorMessage ?? "Unknown error")
+        })
+        .sheet(isPresented: $showConfirmSheet) {
+            ConfirmCaloriesSheet(image: uiImage, initialCalories: estimatedCalories ?? 0, onConfirm: { val in
+                caloriesToSave = max(0, val)
+                Task { await actuallySave() }
+            }, onCancel: {
+                // just close the sheet; user can tap Save again later
+            })
+            .presentationDetents([.height(360)])
         }
     }
 
-    // MARK: - Form Validation
-    private var isFormValid: Bool {
-        imageData != nil && UIImage(data: imageData!) != nil
-    }
-
-    // MARK: - Save Meal Action
-    private func saveMeal() {
-        // One-shot guard to prevent duplicate document creation
-        guard !isUploading && !hasSavedOnce else { return }
-
-        guard let data = imageData, let image = UIImage(data: data) else {
-            errorMessage = "Please select a valid photo."
-            isImageValid = false
+    private func saveTapped() async {
+        guard let uiImage else { return }
+        // If we don't have an estimate yet, try to estimate first and ask for confirmation.
+        if estimatedCalories == nil {
+            isEstimating = true
+            let estimator = OpenAINutritionService()
+            if let estimate = try? await estimator.estimateCalories(from: uiImage) {
+                estimatedCalories = estimate.totalCalories
+                caloriesToSave = estimate.totalCalories
+                showConfirmSheet = true
+            } else {
+                // couldn't estimate — fall back to manual entry sheet with 0 default
+                estimatedCalories = 0
+                caloriesToSave = 0
+                showConfirmSheet = true
+            }
+            isEstimating = false
             return
         }
 
-        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        isUploading = true
-        errorMessage = nil
-
-        Task {
-            do {
-                try await mealViewModel.addMeal(image: image, notes: trimmedNotes)
-                await MainActor.run {
-                    hasSavedOnce = true   // ensure we never re-run
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = parseErrorMessage(error)
-                    showErrorAlert = true
-                    isUploading = false   // allow retry if it failed
-                }
-            }
-        }
+        // If we already have an estimate (sheet may have been shown), go straight to save.
+        await actuallySave()
     }
 
-    // MARK: - Error Message Parser
-    private func parseErrorMessage(_ error: Error) -> String {
-        let nsError = error as NSError
-
-        if nsError.domain == StorageErrorDomain {
-            if let code = StorageErrorCode(rawValue: nsError.code) {
-                switch code {
-                case .unauthorized:
-                    return "Permission denied. Please log in again."
-                case .retryLimitExceeded:
-                    return "Network error. Please check your connection."
-                case .cancelled:
-                    return "Upload cancelled."
-                case .unknown:
-                    return "Unknown error occurred."
-                default:
-                    return "Storage error. Please try again."
-                }
+    private func actuallySave() async {
+        guard let uiImage else { return }
+        isUploading = true
+        do {
+            try await mealViewModel.addMeal(image: uiImage, notes: notes, calories: caloriesToSave)
+            await MainActor.run {
+                self.uiImage = nil
+                notes = ""
+                notesFocused = false
+                dismiss()
+                onSaved?()
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                showErrorAlert = true
             }
         }
-
-        switch nsError.code {
-        case 401:
-            return "You must be logged in to save meals."
-        case 400:
-            return "Invalid image format. Please try another photo."
-        case -1:
-            return "Account error. Please restart the app."
-        case -2:
-            return "Failed to save meal data."
-        default:
-            return "Failed to save meal. Please try again."
-        }
+        isUploading = false
     }
 }
 
+private struct ConfirmCaloriesSheet: View {
+    let image: UIImage?
+    @State var calories: Int
+    var onConfirm: (Int) -> Void
+    var onCancel: () -> Void
+
+    init(image: UIImage?, initialCalories: Int, onConfirm: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
+        self.image = image
+        self._calories = State(initialValue: max(0, initialCalories))
+        self.onConfirm = onConfirm
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if let img = image {
+                Image(uiImage: img).resizable().scaledToFit().frame(height: 140).clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            Text("Estimated calories").font(.headline)
+            HStack {
+                Stepper(value: $calories, in: 0...5000, step: 10) { Text("\(calories) cal") }
+            }
+            .padding(.horizontal)
+
+            HStack {
+                Button("Cancel") { onCancel() }
+                Spacer()
+                Button("Save") { onConfirm(calories) }.buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 16)
+    }
+}

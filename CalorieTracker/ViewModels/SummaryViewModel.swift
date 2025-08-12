@@ -1,70 +1,42 @@
-import SwiftUI
-import Firebase
 
-class SummaryViewModel: ObservableObject {
+import Foundation
+
+@MainActor
+final class SummaryViewModel: ObservableObject {
+    /// Per-day summaries for the last 7 days
     @Published var weeklyData: [DailySummary] = []
-    @Published var dailyGoal: Int?
-    @Published var isLoading = false
-    @Published var error: Error?
-    
-    private let db = Firestore.firestore()
-    private let userId: String
-    private let mealViewModel: MealViewModel
-    
-    var weeklyTotal: Int {
-        weeklyData.reduce(0) { $0 + $1.calories }
-    }
-    
-    var weeklyAverage: Int {
-        let daysWithData = weeklyData.filter { $0.calories > 0 }.count
-        return daysWithData > 0 ? weeklyTotal / daysWithData : 0
-    }
-    
+    /// Optional daily goal (can be set by a parent using profile data)
+    @Published var dailyGoal: Int? = nil
+
+    // Derived stats
+    var weeklyTotal: Int { weeklyData.reduce(0) { $0 + $1.calories } }
+    var weeklyAverage: Int { weeklyData.isEmpty ? 0 : weeklyTotal / weeklyData.count }
     var daysMetGoal: Int {
-        guard let goal = dailyGoal else { return 0 }
-        return weeklyData.filter { $0.calories <= goal && $0.calories > 0 }.count
+        let goal = dailyGoal ?? 2000
+        return weeklyData.filter { $0.calories >= goal }.count
     }
-    
-    init(userId: String, mealViewModel: MealViewModel) {
-        self.userId = userId
-        self.mealViewModel = mealViewModel
-        fetchUserGoal()
-    }
-    
-    func fetchWeeklyData() {
-        isLoading = true
-        Task {
-            do {
-                let dailySummaries = try await mealViewModel.getWeeklyMeals()
-                await MainActor.run {
-                    self.isLoading = false
-                    self.weeklyData = dailySummaries.map {
-                        var modified = $0
-                        modified.goal = self.dailyGoal
-                        return modified
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.error = error
-                }
-            }
+
+    /// Convenience initializer so you can construct with or without a MealViewModel.
+    /// If provided, we immediately build the last 7 days from it.
+    init(mealViewModel: MealViewModel? = nil) {
+        if let vm = mealViewModel {
+            rebuild(using: vm)
         }
     }
-    
-    private func fetchUserGoal() {
-        db.collection("users").document(userId).getDocument { [weak self] document, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                self.error = error
-                return
-            }
-            
-            if let profile = try? document?.data(as: UserProfile.self) {
-                self.dailyGoal = profile.targetCalories
-            }
+
+    /// Rebuild summaries from the meal view model
+    func rebuild(using mealVM: MealViewModel, endingAt end: Date = .init()) {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: end)
+        let days = (0..<7).compactMap { cal.date(byAdding: .day, value: -$0, to: start) }.reversed()
+
+        self.weeklyData = days.map { day in
+            let next = cal.date(byAdding: .day, value: 1, to: day)!
+            let dayMeals = mealVM.meals
+                .filter { $0.date >= day && $0.date < next }
+                .sorted { $0.date > $1.date }
+            let total = dayMeals.reduce(0) { $0 + $1.calories }
+            return DailySummary(date: day, calories: total, meals: dayMeals)
         }
     }
 }

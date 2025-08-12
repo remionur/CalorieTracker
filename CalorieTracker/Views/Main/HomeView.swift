@@ -1,27 +1,24 @@
 import SwiftUI
 
 struct HomeView: View {
-    @StateObject private var viewModel: MealViewModel
+    @EnvironmentObject private var mealViewModel: MealViewModel
     @State private var showingImagePicker = false
     @State private var inputImage: UIImage?
     
     let userProfile: UserProfile
     
-    init(userId: String, userProfile: UserProfile) {  // Fix 1: Proper initializer
-        _viewModel = StateObject(wrappedValue: MealViewModel(userId: userId))
-        self.userProfile = userProfile
-    }
+    init(userProfile: UserProfile) { self.userProfile = userProfile }
     
     var body: some View {
         VStack {
             // Header with remaining calories
             CalorieHeaderView(
-                consumed: viewModel.meals.reduce(0) { $0 + $1.calories },
+                consumed: mealViewModel.meals.reduce(0) { $0 + $1.calories },
                 goal: userProfile.targetCalories ?? 2000
             )
             
             // Recent meals - Fix 2: Ensure Meal conforms to Identifiable
-            List(viewModel.meals) { meal in
+            List(mealViewModel.meals) { meal in
                 MealCard(meal: meal)
             }
             
@@ -43,7 +40,7 @@ struct HomeView: View {
         guard let image = inputImage else { return }
         Task {
             do {
-                try await viewModel.addMeal(image: image)
+                try await mealViewModel.addMeal(image: image)
                 inputImage = nil
             } catch {
                 print("Error adding meal: \(error)")

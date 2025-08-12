@@ -3,24 +3,24 @@ import SwiftUI
 import Charts
 
 struct WeeklySummaryView: View {
-    @ObservedObject var viewModel: SummaryViewModel
-    @State private var selectedDay: Date?
+    @EnvironmentObject private var mealViewModel: MealViewModel
+    @StateObject private var viewModel = SummaryViewModel()
+    @State private var selectedDay: Date? = nil
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 WeeklyHeader()
-
-                WeeklyChartView(viewModel: viewModel)
-
-                WeeklyStats(viewModel: viewModel)
-
-                DailyDetail(viewModel: viewModel, selectedDay: selectedDay)
+                WeeklyChartView(weeklyData: viewModel.weeklyData, dailyGoal: viewModel.dailyGoal)
+                WeeklyStats(total: viewModel.weeklyTotal, average: viewModel.weeklyAverage, daysMetGoal: viewModel.daysMetGoal)
+                DailyDetail(weeklyData: viewModel.weeklyData, selectedDay: selectedDay)
             }
             .padding()
         }
+        .navigationTitle("Weekly Summary")
         .onAppear {
-            viewModel.fetchWeeklyData()
+            if !mealViewModel.isListening { mealViewModel.startListening() }
+            viewModel.rebuild(using: mealViewModel)
         }
     }
 }
@@ -33,99 +33,75 @@ private struct WeeklyHeader: View {
 }
 
 private struct WeeklyChartView: View {
-    @ObservedObject var viewModel: SummaryViewModel
+    let weeklyData: [DailySummary]
+    let dailyGoal: Int?
 
     var body: some View {
         Chart {
-            ForEach(viewModel.weeklyData) { day in
+            ForEach(weeklyData) { day in
                 BarMark(
                     x: .value("Day", day.date, unit: .day),
                     y: .value("Calories", day.calories)
                 )
-                .foregroundStyle(day.calories > (viewModel.dailyGoal ?? 2000) ? .red : .green)
+                .foregroundStyle(day.calories > (dailyGoal ?? 2000) ? .red : .green)
                 .annotation(position: .top) {
                     Text("\(day.calories)")
                         .font(.caption2)
                 }
             }
-
-            if let goal = viewModel.dailyGoal {
-                RuleMark(y: .value("Goal", goal))
-                    .foregroundStyle(.orange)
-                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5]))
-            }
         }
-        .frame(height: 300)
-        .chartXAxis {
-            AxisMarks(values: .stride(by: .day)) { value in
-                AxisGridLine()
-                AxisValueLabel(format: .dateTime.weekday(.abbreviated))
-            }
-        }
+        .frame(height: 220)
     }
 }
 
 private struct WeeklyStats: View {
-    @ObservedObject var viewModel: SummaryViewModel
+    let total: Int
+    let average: Int
+    let daysMetGoal: Int
 
     var body: some View {
-        HStack {
-            StatCard(title: "Total", value: "\(viewModel.weeklyTotal)", unit: "cal")
-            StatCard(title: "Avg/Day", value: "\(viewModel.weeklyAverage)", unit: "cal")
-            StatCard(title: "Goal Met", value: "\(viewModel.daysMetGoal)", unit: "days")
+        HStack(spacing: 12) {
+            StatCard(title: "Total", value: "\(total)", unit: "cal")
+            StatCard(title: "Average", value: "\(average)", unit: "cal/day")
+            StatCard(title: "Days Met Goal", value: "\(daysMetGoal)", unit: "days")
         }
     }
 }
 
 private struct DailyDetail: View {
-    @ObservedObject var viewModel: SummaryViewModel
+    let weeklyData: [DailySummary]
     let selectedDay: Date?
 
     var body: some View {
-        if let selectedDay = selectedDay,
-           let dayData = viewModel.weeklyData.first(where: { Calendar.current.isDate($0.date, inSameDayAs: selectedDay) }) {
-            DayDetailView(dayData: dayData)
-        } else {
-            Text("Select a day on the chart to see details")
-                .foregroundColor(.gray)
+        let dateToShow = selectedDay ?? weeklyData.last?.date
+        if let date = dateToShow,
+           let day = weeklyData.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(date.formatted(date: .complete, time: .omitted))
+                    .font(.headline)
+                if day.meals.isEmpty {
+                    Text("No meals recorded for this day")
+                        .foregroundColor(.gray)
+                } else {
+                    ForEach(day.meals) { meal in
+                        MealCard(meal: meal)
+                    }
+                }
+            }
         }
     }
 }
 
 private struct StatCard: View {
-    let title: String
-    let value: String
-    let unit: String
-
+    let title: String; let value: String; let unit: String
     var body: some View {
-        VStack {
-            Text(title)
-                .font(.headline)
-            Text(value)
-                .font(.title)
-                .bold()
-            Text(unit)
-                .font(.caption)
-                .foregroundColor(.gray)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3).bold()
+            Text(unit).font(.caption2).foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 }
-
-private struct DayDetailView: View {
-    let dayData: DailySummary
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            Text("Details for \(dayData.date.formatted(.dateTime.weekday().month().day()))")
-                .font(.headline)
-            Text("Calories: \(dayData.calories)")
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
-    }
-}
-
