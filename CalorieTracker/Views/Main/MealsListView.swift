@@ -15,90 +15,104 @@ struct MealsListView: View {
         }
     }
 
-    
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground).ignoresSafeArea()
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let pad = max(12, min(w, h) * 0.04)
 
-            List {
-                ForEach(groupedByDay, id: \.0) { (day, meals) in
-                    DaySection(day: day, meals: meals)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(groupedByDay, id: \.0) { (day, meals) in
+                        HStack {
+                            Text(day, format: .dateTime.month(.abbreviated).day(.twoDigits).year())
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            let total = meals.reduce(0) { $0 + $1.calories }
+                            Text("\(total) cal").foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 4)
+
+                        VStack(spacing: 10) {
+                            ForEach(meals) { meal in
+                                NavigationLink {
+                                    MealDetailView(meal: meal)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        if let urlStr = meal.imageUrl, let url = URL(string: urlStr) {
+                                            AsyncImage(url: url) { image in
+                                                image.resizable().scaledToFill()
+                                            } placeholder: {
+                                                Color.gray.opacity(0.2)
+                                            }
+                                            .frame(width: 90, height: 90)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        } else {
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.gray.opacity(0.1))
+                                                .frame(width: 90, height: 90)
+                                                .overlay(Image(systemName: "photo"))
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("\(meal.calories) cal").font(.headline)
+                                            if !meal.notes.isEmpty {
+                                                Text(meal.notes).font(.subheadline).foregroundStyle(.secondary)
+                                            }
+                                            Text(meal.date.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer(minLength: 0)
+                                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                    }
+                                    .padding()
+                                    .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                                }
+                            }
+                        }
+                    }
                 }
+                .padding(.horizontal, pad)
+                
+                .frame(minHeight: h, alignment: .top)
             }
-            .listStyle(.insetGrouped)
+            .background(Color(.systemBackground).ignoresSafeArea())
         }
         .navigationTitle("Meals")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color(.systemBackground), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .navigationDestination(for: Meal.self) { meal in
-            MealDetailScreen(meal: meal)
-        }
-        .refreshable {
-            isRefreshing = true
-            if !mealViewModel.isListening { mealViewModel.startListening() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { isRefreshing = false }
-        }
-        .onAppear {
-            if mealViewModel.meals.isEmpty { if !mealViewModel.isListening { mealViewModel.startListening() } }
-        }
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-private struct DaySection: View {
-    let day: Date
-    let meals: [Meal]
-
-    var body: some View {
-        let dailyTotal = meals.reduce(0) { $0 + $1.calories }
-        Section {
-            ForEach(meals) { meal in
-                NavigationLink(value: meal) {
-                    MealCard(meal: meal)
-                }
-            }
-        } header: {
-            HStack {
-                Text(day.formatted(date: .abbreviated, time: .omitted))
-                Spacer()
-                Text("\(dailyTotal) cal").foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct MealDetailScreen: View {
+/// Minimal detail view (kept for navigation continuity)
+struct MealDetailView: View {
+    let meal: Meal
     @EnvironmentObject private var mealViewModel: MealViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var isDeleting = false
     @State private var deleteError: String?
-    let meal: Meal
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let imageUrl = meal.imageUrl, let url = URL(string: imageUrl) {
+        List {
+            Section {
+                if let urlStr = meal.imageUrl, let url = URL(string: urlStr) {
                     AsyncImage(url: url) { image in
                         image.resizable().scaledToFit()
-                    } placeholder: {
-                        Rectangle().opacity(0.08).aspectRatio(1, contentMode: .fit)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } placeholder: { ProgressView() }
+                        .frame(maxWidth: .infinity)
                 }
                 Text("\(meal.calories) cal").font(.title2.bold())
+                if !meal.notes.isEmpty { Text(meal.notes) }
                 Text(meal.date.formatted(date: .abbreviated, time: .shortened))
                     .foregroundStyle(.secondary)
-                if !meal.notes.isEmpty { Text(meal.notes) }
-                Spacer(minLength: 24)
             }
-            .padding()
         }
-        .navigationTitle("Meal")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) { Task { await deleteMeal() } } label: {
-                    Label("Delete", systemImage: "trash")
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(role: .destructive) {
+                    Task { await deleteMeal() }
+                } label: {
+                    if isDeleting { ProgressView() } else { Text("Delete") }
                 }
                 .disabled(isDeleting)
             }

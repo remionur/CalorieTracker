@@ -6,14 +6,19 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if authViewModel.isAuthenticated() && authViewModel.userProfile != nil {
+            if authViewModel.isAuthenticated {
+                // Your main UI when signed in and profile exists
                 MainTabView()
                     .environmentObject(authViewModel)
                     .environmentObject(mealViewModel)
             } else {
+                // Onboarding / create profile flow
                 OnboardingView()
+                    .environmentObject(authViewModel)
+                    .environmentObject(mealViewModel)
             }
         }
+        .onAppear { authViewModel.bootstrap() }
     }
 }
 

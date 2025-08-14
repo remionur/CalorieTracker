@@ -1,9 +1,10 @@
 import SwiftUI
 
 struct TodayView: View {
-    @EnvironmentObject private var authViewModel: AuthViewModel
     @EnvironmentObject private var mealViewModel: MealViewModel
+    @EnvironmentObject private var authViewModel: AuthViewModel
 
+    // Today’s meals (most recent first)
     private var todayMeals: [Meal] {
         let cal = Calendar.current
         let start = cal.startOfDay(for: Date())
@@ -15,59 +16,69 @@ struct TodayView: View {
 
     private var consumed: Int { todayMeals.reduce(0) { $0 + $1.calories } }
 
+    /// Daily goal = manual override if set, otherwise calculated from the profile.
     private var dailyGoal: Int {
-        if let goal = authViewModel.userProfile?.targetCalories, goal > 0 { return goal }
+        if let manual = authViewModel.userProfile?.dailyCalorieLimit, manual > 0 { return manual }
         if let profile = authViewModel.userProfile { return CalorieCalculator.targetCalories(for: profile) }
         return 0
     }
 
     private var remaining: Int { max(dailyGoal - consumed, 0) }
-    private var progress: Double { dailyGoal > 0 ? min(Double(consumed)/Double(dailyGoal), 1) : 0 }
+    private var progress: Double { dailyGoal > 0 ? min(Double(consumed) / Double(dailyGoal), 1) : 0 }
 
     var body: some View {
-        ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let pad  = max(12, min(w, h) * 0.04)
+            let gap  = max(12, min(w, h) * 0.03)
+            let ring = max(88, min(min(w, h) * 0.26, 180))
+            let corner = max(14, min(w, h) * 0.05)
 
             ScrollView {
-                VStack(spacing: 16) {
-                    HStack(spacing: 16) {
+                VStack(spacing: gap) {
+                    // Header card
+                    HStack(spacing: gap) {
                         ProgressRing(progress: progress)
-                            .frame(width: 96, height: 96)
+                            .frame(width: ring, height: ring)
+
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Consumed").font(.caption).foregroundStyle(.secondary)
-                            Text(consumed, format: .number.grouping(.automatic)) + Text(" cal")
-                                .font(.title2.bold())
-                            Divider().frame(width: 120)
+                            (Text(consumed, format: .number.grouping(.automatic)) + Text(" cal"))
+                                .font(.system(size: max(20, w * 0.06), weight: .bold))
+
+                            Divider().frame(width: max(100, w * 0.28))
+
                             Text("Remaining").font(.caption).foregroundStyle(.secondary)
                             (Text(remaining, format: .number.grouping(.automatic)) + Text(" cal"))
-                                .font(.title3.bold())
+                                .font(.system(size: max(18, w * 0.05), weight: .semibold))
                                 .foregroundStyle(remaining > 0 ? .green : .red)
                         }
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
-                    .padding()
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(pad)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: corner))
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Today's Meals").font(.headline)
+                    // Meals section
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Today’s Meals").font(.headline)
                         if todayMeals.isEmpty {
                             Text("No meals yet today.").foregroundStyle(.secondary)
                         } else {
-                            ForEach(todayMeals) { meal in MealCard(meal: meal) }
+                            ForEach(todayMeals) { meal in
+                                MealCard(meal: meal)
+                            }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.horizontal, pad)
+                 // small bottom breathing room
+                .frame(minHeight: h, alignment: .top)  // fill viewport to avoid big voids
             }
+            .background(Color(.systemBackground).ignoresSafeArea())
         }
         .navigationTitle("Today")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color(.systemBackground), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .onAppear {
-            if !mealViewModel.isListening { mealViewModel.startListening() }
-        }
+        .navigationBarTitleDisplayMode(.inline) // tighter top spacing
     }
 }

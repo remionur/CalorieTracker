@@ -1,110 +1,125 @@
 import SwiftUI
 import FirebaseAuth
 
+// Readable labels for pickers
+private extension Goal {
+    var label: String {
+        switch self {
+        case .weightLoss:         return "Weight Loss"
+        case .weightMaintenance:  return "Weight Maintenance"
+        case .weightGain:         return "Weight Gain"
+        }
+    }
+}
+private extension ActivityLevel {
+    var label: String {
+        switch self {
+        case .sedentary:        return "Sedentary"
+        case .lightlyActive:    return "Lightly Active"
+        case .moderatelyActive: return "Moderately Active"
+        case .veryActive:       return "Very Active"
+        case .extremelyActive:  return "Extremely Active"
+        }
+    }
+}
+
 struct ProfileSetupView: View {
-    @State private var name = ""
-    @State private var age = ""
-    @State private var gender = "Male"
-    @State private var weight = ""
-    @State private var height = ""
-    @State private var goal = UserProfile.GoalType.weightMaintenance
-    @State private var activityLevel = UserProfile.ActivityLevel.moderatelyActive
+    // Text fields as strings; we’ll validate/convert on Save
+    @State private var ageText: String = ""
+    @State private var heightText: String = ""   // cm
+    @State private var weightText: String = ""   // kg
+    @State private var gender: String = "Male"
+
+    @State private var goal: Goal = .weightMaintenance
+    @State private var activityLevel: ActivityLevel = .moderatelyActive
+
     @State private var isLoading = false
     @State private var error: String?
-    
+
     let genders = ["Male", "Female", "Other"]
-    let goals = UserProfile.GoalType.allCases
-    let activityLevels = UserProfile.ActivityLevel.allCases
-    
+
+    /// Caller provides what to do with the completed profile
     var onCompletion: (UserProfile) -> Void
-    
+
     var body: some View {
         Form {
-            Section(header: Text("Personal Information")) {
-                TextField("Name", text: $name)
-                TextField("Age", text: $age)
-                    .keyboardType(.numberPad)
-                
+            Section("Personal Information") {
                 Picker("Gender", selection: $gender) {
-                    ForEach(genders, id: \.self) { gender in
-                        Text(gender)
-                    }
+                    ForEach(genders, id: \.self) { Text($0) }
                 }
-                
-                HStack {
-                    TextField("Weight", text: $weight)
-                        .keyboardType(.decimalPad)
-                    Text("kg")
-                }
-                
-                HStack {
-                    TextField("Height", text: $height)
-                        .keyboardType(.decimalPad)
-                    Text("cm")
-                }
+                TextField("Age (years)", text: $ageText)
+                    .keyboardType(.numberPad)
+                TextField("Height (cm)", text: $heightText)
+                    .keyboardType(.decimalPad)
+                TextField("Weight (kg)", text: $weightText)
+                    .keyboardType(.decimalPad)
             }
-            
-            Section(header: Text("Goals")) {
-                Picker("Goal", selection: $goal) {
-                    ForEach(goals, id: \.self) { goal in
-                        Text(goal.rawValue)
-                    }
-                }
-                
+
+            Section("Lifestyle & Goal") {
                 Picker("Activity Level", selection: $activityLevel) {
-                    ForEach(activityLevels, id: \.self) { level in
-                        Text(level.rawValue)
+                    ForEach(ActivityLevel.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                Picker("Goal", selection: $goal) {
+                    ForEach(Goal.allCases) { g in
+                        Text(g.label).tag(g)
                     }
                 }
             }
-            
-            if let error = error {
+
+            if let error {
                 Text(error)
                     .foregroundColor(.red)
             }
-            
-            Button(action: saveProfile) {
-                if isLoading {
-                    ProgressView()
-                } else {
-                    Text("Complete Setup")
+
+            Section {
+                Button {
+                    save()
+                } label: {
+                    if isLoading { ProgressView() } else { Text("Save Profile") }
                 }
+                .disabled(isLoading)
             }
-            .disabled(!formIsValid)
         }
-        .navigationTitle("Profile Setup")
+        .navigationTitle("Set Up Profile")
     }
-    
-    private var formIsValid: Bool {
-        !name.isEmpty &&
-        Int(age) != nil &&
-        Double(weight) != nil &&
-        Double(height) != nil
-    }
-    
-    private func saveProfile() {
-        guard let age = Int(age),
-              let weight = Double(weight),
-              let height = Double(height) else {
-            error = "Please enter valid values"
+
+    private func save() {
+        error = nil
+
+        guard let uid = Auth.auth().currentUser?.uid else {
+            error = "You must be signed in."
             return
         }
-        
+        guard let age = Int(ageText), age > 0 else {
+            error = "Please enter a valid age."
+            return
+        }
+        guard let height = Double(heightText), height > 0 else {
+            error = "Please enter height in centimeters."
+            return
+        }
+        guard let weight = Double(weightText), weight > 0 else {
+            error = "Please enter weight in kilograms."
+            return
+        }
+
         isLoading = true
-        
         let profile = UserProfile(
-            id: Auth.auth().currentUser?.uid ?? "unknown",
-            name: name,
-            gender: gender,
+            id: uid,
+            gender: gender,              // stored lowercased by toDict()
             age: age,
-            weight: weight,
             height: height,
-            goal: goal,
+            weight: weight,
             activityLevel: activityLevel,
-            targetCalories: nil,
-            createdAt: Date()
+            goal: goal,
+            dailyCalorieLimit: nil       // no manual override initially
         )
-        
+
+        // hand back to caller (e.g., call ProfileViewModel.saveProfile in the parent)
         onCompletion(profile)
+        isLoading = false
     }
 }
+

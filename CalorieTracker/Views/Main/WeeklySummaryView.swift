@@ -92,7 +92,7 @@ private struct DailyDetail: View {
     }
 }
 
-private struct StatCard: View {
+/*private struct StatCard: View {
     let title: String; let value: String; let unit: String
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -105,3 +105,4 @@ private struct StatCard: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 }
+*/
