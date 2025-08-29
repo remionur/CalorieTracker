@@ -8,6 +8,7 @@ struct AddMealView: View {
 
     @State private var selectedImage: PhotosPickerItem?
     @State private var uiImage: UIImage?
+    @State private var showPhotoPicker = false
     @State private var notes = ""
     @State private var isUploading = false
     @State private var errorMessage: String?
@@ -15,84 +16,91 @@ struct AddMealView: View {
     @FocusState private var notesFocused: Bool
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let pad  = max(16, min(w, h) * 0.05)
-
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Image picker card
-                    Button {
-                        notesFocused = false
-                        Task { await pickPhoto() }
-                    } label: {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 14).stroke(.primary.opacity(0.15), lineWidth: 1)
-                                .background(RoundedRectangle(cornerRadius: 14).fill(.secondary.opacity(0.08)))
-                                .frame(height: max(220, h * 0.26))
-                            if let uiImage {
-                                Image(uiImage: uiImage)
-                                    .resizable().scaledToFill()
-                                    .frame(height: max(220, h * 0.26))
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                            } else {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "photo.on.rectangle").font(.title2)
-                                    Text("Tap to choose a photo").font(.subheadline).foregroundStyle(.secondary)
-                                }
+        ScrollView {
+            VStack(spacing: 16) {
+                Button {
+                    notesFocused = false
+                    Task { await pickPhoto() }
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(.primary.opacity(0.15), lineWidth: 1)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(.secondary.opacity(0.08)))
+                            .frame(height: 220)
+                        
+                        if let uiImage {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                        } else {
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.title2)
+                                Text("Tap to choose a photo")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
-                    .buttonStyle(.plain)
+                    .safeAreaPadding(.bottom, 8)
 
-                    // Notes
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Notes").font(.headline)
-                        TextField("Optional", text: $notes, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($notesFocused)
-                    }
-
-                    // Save
-                    HStack {
-                        Spacer()
-                        Button {
-                            Task { await save() }
-                        } label: {
-                            if isUploading {
-                                ProgressView()
-                            } else {
-                                Text("Save")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
                 }
-                .padding(.horizontal, pad)
+                .buttonStyle(.plain)
                 
-                .frame(minHeight: h, alignment: .top)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notes").font(.headline)
+                    TextField("Optional", text: $notes, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($notesFocused)
+                }
+                
+                HStack {
+                    Spacer()
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isUploading {
+                            ProgressView()
+                        } else {
+                            Text("Save")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
-            .background(Color(.systemBackground).ignoresSafeArea())
+            .padding(16)
         }
         .navigationTitle("Add Meal")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Error", isPresented: $showErrorAlert) { Button("OK", role: .cancel) { } } message: {
+        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 60) }
+        
+        
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
             Text(errorMessage ?? "Something went wrong.")
         }
-    }
-
-    // MARK: - Actions
+    
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedImage, matching: .images)
+        .task(id: selectedImage) {
+            guard let item = selectedImage else { return }
+            do {
+                if let data = try await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    uiImage = image
+                }
+            } catch {
+                errorMessage = "Failed to load photo."
+                showErrorAlert = true
+            }
+        }
+}
 
     private func pickPhoto() async {
-        // Present the Photos picker
-        // Caller already wrapped this in a button tap
-        selectedImage = nil
-        #if os(iOS)
-        // .photosPicker is usually attached to a view, but to keep this self-contained
-        // we fallback to the older UIImagePickerController flow if desired.
-        #endif
+        showPhotoPicker = true
     }
 
     private func save() async {

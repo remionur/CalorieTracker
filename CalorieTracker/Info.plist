@@ -24,6 +24,8 @@
 	<false/>
 	<key>GoogleUtilitiesSceneDelegateProxyEnabled</key>
 	<false/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Allow CalorieTracker to access your photo library to add meal photos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
